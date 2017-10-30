@@ -2449,7 +2449,10 @@
 (defmethod region-contains-region-p ((a region) (b region))
   (or (eq a b)
       (region-equal +nowhere+ (region-difference b a))))
-  
+
+(defmethod region-contains-region-p ((a standard-rectangle) (b bounding-rectangle))
+  (or (eq a b)
+      (region-equal +nowhere+ (region-difference (bounding-rectangle b) a))))
 ;;;; ===========================================================================
 
 (defmethod bounding-rectangle* ((a standard-line))
