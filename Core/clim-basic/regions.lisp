@@ -669,27 +669,33 @@
                                  end-angle))))))
 
 (defmethod bounding-rectangle* ((region standard-ellipse))
-  ;; XXX start/end angle still missing
-  (with-slots (tr) region
-    (flet ((contact-radius* (x y)
-             ;; Returns coordinates of the radius of the point, in
-             ;; which the vector field (x y) touches the ellipse.
-             (multiple-value-bind (xc yc) (untransform-distance tr x y)
-               (let* ((d (sqrt (+ (* xc xc) (* yc yc))))
-                      (xn (- (/ yc d)))
-                      (yn (/ xc d)))
-                 (transform-distance tr xn yn)))))
-      (multiple-value-bind (cx cy) (ellipse-center-point* region)
-        (if (zerop (ellipse-radii region))
-            (values cx cy cx cy)
-            (multiple-value-bind (vdx vdy) (contact-radius* 1 0)
-              (declare (ignore vdx))
-              (multiple-value-bind (hdx hdy) (contact-radius* 0 1)
-                (declare (ignore hdy))
-                (let ((rx (abs hdx))
-                      (ry (abs vdy)))
-                  (values (- cx rx) (- cy ry)
-                          (+ cx rx) (+ cy ry))))))))))
+  (with-slots (tr start-angle end-angle) region
+    (multiple-value-bind (cx cy) (ellipse-center-point* region)
+      (when (every #'zerop (multiple-value-list (ellipse-radii region)))
+        (return-from bounding-rectangle* (values cx cy cx cy)))
+      (multiple-value-bind (x-min y-min x-max y-max)
+          (ellipse-bounding-rectangle region)
+        (unless (null start-angle)
+          ;; I'm sure this part may be simplified a little, but I'm running
+          ;; out of steam. -- jd
+          (flet ((rcp* (x y)
+                   (unless (or (complexp x) (complexp y))
+                     (region-contains-position-p region x y))))
+            (multiple-value-bind (sa-x sa-y) (%ellipse-angle->position region start-angle)
+              (multiple-value-bind (ea-x ea-y) (%ellipse-angle->position region end-angle)
+                (multiple-value-bind (ep-x ep-y) (intersection-vline/ellipse region x-min)
+                  (unless (rcp* ep-x ep-y)
+                    (setf x-min (min cx sa-x ea-x))))
+                (multiple-value-bind (ep-x ep-y) (intersection-hline/ellipse region y-min)
+                  (unless (rcp* ep-x ep-y)
+                    (setf y-min (min cy sa-y ea-y))))
+                (multiple-value-bind (ep-x ep-y) (intersection-vline/ellipse region x-max)
+                  (unless (rcp* ep-x ep-y)
+                    (setf x-max (max cx sa-x ea-x))))
+                (multiple-value-bind (ep-x ep-y) (intersection-hline/ellipse region y-max)
+                  (unless (rcp* ep-x ep-y)
+                    (setf y-max (max cy sa-y ea-y))))))))
+        (values x-min y-min x-max y-max)))))
 
 (defun intersection-hline/ellipse (el y)
   "Returns coordinates where ellipse intersects with a horizontal line."
@@ -976,6 +982,41 @@
 			       (- (* b x2)) (* a x2))
 			    c))))
 	     (values x1 y1 x2 y2))))))
+
+(defun ellipse-simplified-representation (el)
+  ;; returns H (horizontal radius), V (vertical radius) and rotation angle in
+  ;; screen coordinates.
+  (multiple-value-bind (center-x center-y) (ellipse-center-point* el)
+    (multiple-value-bind (hx hy vx vy) (ellipse-normal-radii* el)
+      (let ((phi (atan* hx hy)))
+        (values center-x
+                center-y
+                (+ (* hx (cos phi)) (* hy (sin phi)))
+                (+ (* vx (sin phi)) (* vy (cos phi)))
+                phi)))))
+
+(defun ellipse-bounding-rectangle (el)
+  ;; returns bounding rectangle of ellipse centered at (0, 0) with radii h and v
+  ;; rotated by the angle phi.
+  (multiple-value-bind (cx cy h v phi) (ellipse-simplified-representation el)
+    (let* ((sin (sin phi))
+           (cos (cos phi))
+           (a (+ (expt (* v cos) 2)
+                 (expt (* h sin) 2)))
+           (numerator (- (* a h h v v)))
+           (denominator-common (expt (* cos
+                                        sin
+                                        (- (* v v) (* h h)))
+                                     2))
+           (y (sqrt (/ numerator
+                       (- denominator-common
+                          (* a (+ (expt (* v sin) 2)
+                                  (expt (* h cos) 2)))))))
+           (x (sqrt (/ numerator
+                       (- denominator-common
+                          (* a (+ (expt (* v cos) 2)
+                                  (expt (* h sin) 2))))))))
+      (values (- cx x) (- cy y) (+ cx x) (+ cy y)))))
 
 ;;; -- Intersection of Ellipse vs. Ellipse -----------------------------------
 
